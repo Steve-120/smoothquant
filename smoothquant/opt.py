@@ -357,6 +357,8 @@ class Int8OPTDecoder(OPTPreTrainedModel):
         else:
             self.final_layer_norm = None
 
+        self._use_flash_attention_2 = config._attn_implementation == "flash_attention_2"
+
         self.layers = nn.ModuleList(
             [
                 Int8OPTDecoderLayer(
