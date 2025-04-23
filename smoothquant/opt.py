@@ -12,8 +12,10 @@ from transformers.models.opt.modeling_opt import (
     BaseModelOutputWithPast,
 )
 from typing import Optional, Tuple, List
+# from torch_int.nn.linear import W8A8BFP32OFP32Linear, W8A8B8O8Linear, W8A8B8O8LinearReLU
+# from torch_int.nn.fused import LayerNormQ
 from torch_int.nn.linear import W8A8BFP32OFP32Linear, W8A8B8O8Linear, W8A8B8O8LinearReLU
-from torch_int.nn.fused import LayerNormQ
+from torch_int.ibert import QuantEmbedding, QuantAct, QuantLinear, IntLayerNorm, IntGELU, IntSoftmax
 from transformers.utils import logging
 from torch_int.nn.bmm import BMM_S8T_S8N_S8T, BMM_S8T_S8N_F32T
 
@@ -160,7 +162,11 @@ class Int8OPTAttention(nn.Module):
             )
             attn_weights = attn_weights.view(bsz * self.num_heads, tgt_len, src_len)
 
-        attn_probs = nn.functional.softmax(attn_weights, dim=-1)
+        pre_softmax_quant_layer = QuantAct(activation_bit=8, quant_mode='symmetric')
+        int_softmax_layer = IntSoftmax(output_bit=8, quant_mode='symmetric')
+        quant_weights, scaling_factor = pre_softmax_quant_layer(attn_weights)
+        attn_probs, _ = int_softmax_layer(quant_weights, scaling_factor)  # auto-dequant
+
 
         if layer_head_mask is not None:
             if layer_head_mask.size() != (self.num_heads,):
@@ -217,10 +223,12 @@ class Int8OPTDecoderLayer(nn.Module):
             embed_dim=self.embed_dim, num_heads=num_attention_heads
         )
 
-        self.self_attn_layer_norm = LayerNormQ(self.embed_dim)
+        # self.self_attn_layer_norm = LayerNormQ(self.embed_dim)
+        self.self_attn_layer_norm = IntLayerNorm(output_bit=8, quant_mode='symmetric')
         self.fc1 = W8A8B8O8LinearReLU(self.embed_dim, ffn_dim)
         self.fc2 = W8A8BFP32OFP32Linear(ffn_dim, self.embed_dim)
-        self.final_layer_norm = LayerNormQ(self.embed_dim)
+        # self.final_layer_norm = LayerNormQ(self.embed_dim)
+        self.final_layer_norm = IntLayerNorm(output_bit=8, quant_mode='symmetric')
 
     @staticmethod
     def from_float(
@@ -236,9 +244,13 @@ class Int8OPTDecoderLayer(nn.Module):
         int8_module = Int8OPTDecoderLayer(
             module.embed_dim, module.self_attn.num_heads, module.fc1.out_features
         )
-        int8_module.self_attn_layer_norm = LayerNormQ.from_float(
-            module.self_attn_layer_norm, attn_input_scale
-        )
+
+        # int8_module.self_attn_layer_norm = LayerNormQ.from_float(
+        #     module.self_attn_layer_norm, attn_input_scale
+        # )
+        int8_module.self_attn_layer_norm = IntLayerNorm(output_bit=8, quant_mode='symmetric')
+        int8_module.self_attn_layer_norm.set_param(module.self_attn_layer_norm)
+
         int8_module.self_attn = Int8OPTAttention.from_float(
             module.self_attn,
             attn_input_scale,
@@ -247,9 +259,13 @@ class Int8OPTDecoderLayer(nn.Module):
             v_output_scale,
             out_input_scale,
         )
-        int8_module.final_layer_norm = LayerNormQ.from_float(
-            module.final_layer_norm, fc1_input_scale
-        )
+
+        # int8_module.final_layer_norm = LayerNormQ.from_float(
+        #     module.final_layer_norm, fc1_input_scale
+        # )
+        int8_module.final_layer_norm = IntLayerNorm(output_bit=8, quant_mode='symmetric')
+        int8_module.final_layer_norm.set_param(module.final_layer_norm)
+
         int8_module.fc1 = W8A8B8O8LinearReLU.from_float(
             module.fc1, fc1_input_scale, fc2_input_scale
         )
@@ -285,8 +301,9 @@ class Int8OPTDecoderLayer(nn.Module):
 
         # Self Attention
         residual = hidden_states
-        hidden_states = self.self_attn_layer_norm(hidden_states)
+        hidden_states, attn_norm_scaling_factor = self.self_attn_layer_norm(hidden_states)
 
+        # WARNING!: THIS MAY NEED SOME SCALING FACTOR IF WE WANNT A FULL QUANTIZATION
         hidden_states, self_attn_weights, present_key_value = self.self_attn(
             hidden_states=hidden_states,
             past_key_value=past_key_value,
