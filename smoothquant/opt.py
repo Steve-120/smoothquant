@@ -15,7 +15,7 @@ from typing import Optional, Tuple, List
 # from torch_int.nn.linear import W8A8BFP32OFP32Linear, W8A8B8O8Linear, W8A8B8O8LinearReLU
 # from torch_int.nn.fused import LayerNormQ
 from torch_int.nn.linear import W8A8BFP32OFP32Linear, W8A8B8O8Linear, W8A8B8O8LinearReLU
-from torch_int.ibert import QuantEmbedding, QuantAct, QuantLinear, IntLayerNorm, IntGELU, IntSoftmax
+from ibert import QuantEmbedding, QuantAct, QuantLinear, IntLayerNorm, IntGELU, IntSoftmax
 from transformers.utils import logging
 from torch_int.nn.bmm import BMM_S8T_S8N_S8T, BMM_S8T_S8N_F32T
 
