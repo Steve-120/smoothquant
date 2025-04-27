@@ -374,6 +374,8 @@ class Int8OPTDecoder(OPTPreTrainedModel):
         else:
             self.final_layer_norm = None
 
+        self._use_flash_attention_2 = config._attn_implementation == "flash_attention_2"
+
         self.layers = nn.ModuleList(
             [
                 Int8OPTDecoderLayer(
@@ -389,7 +391,7 @@ class Int8OPTDecoder(OPTPreTrainedModel):
 
     get_input_embeddings = OPTDecoder.get_input_embeddings
     set_input_embeddings = OPTDecoder.set_input_embeddings
-    _prepare_decoder_attention_mask = OPTDecoder._prepare_decoder_attention_mask
+    # _prepare_decoder_attention_mask = OPTDecoder._prepare_decoder_attention_mask
     old_forward = OPTDecoder.forward
 
     @staticmethod
